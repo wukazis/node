@@ -1,0 +1,9 @@
+{
+  "name": "word-nodes-visualization",
+  "version": "1.0.0",
+  "description": "Interactive word nodes visualization with meanings",
+  "scripts": {
+    "dev": "python -m http.server 8000",
+    "build": "echo 'No build needed'"
+  }
+}

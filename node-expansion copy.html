@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>节点扩展动画</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 100vw;
+            height: 100vh;
+            background: radial-gradient(circle at center, #1a2a1a 0%, #0a150a 100%);
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+        }
+
+        #canvas {
+            display: block;
+            cursor: grab;
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #764ba2;
+        }
+
+        .info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .node-input {
+            position: absolute;
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 5px;
+            padding: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .node-input input {
+            border: none;
+            outline: none;
+            font-size: 14px;
+            padding: 5px;
+            width: 150px;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .edge-indicator {
+            position: absolute;
+            background: rgba(102, 126, 234, 0.3);
+            pointer-events: none;
+            transition: opacity 0.2s;
+            opacity: 0;
+        }
+
+        .edge-indicator.active {
+            opacity: 1;
+        }
+
+        .edge-top {
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 80px;
+        }
+
+        .edge-bottom {
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 80px;
+        }
+
+        .edge-left {
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 80px;
+        }
+
+        .edge-right {
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 80px;
+        }
+
+        .word-tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: #60ff90;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            max-width: 350px;
+            pointer-events: none;
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.3s, transform 0.3s;
+            border: 1px solid #60ff90;
+            box-shadow: 0 4px 20px rgba(96, 255, 144, 0.3);
+        }
+
+        .word-tooltip.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .word-tooltip .word-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 6px;
+        }
+
+        .word-tooltip .word-meaning {
+            color: #a0ffd0;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+
+
+    <div class="info">
+        拖动画布移动 | 滚轮缩放 | 鼠标靠近边缘自动滚动 | 点击节点编辑 | 点击空白添加 | 节点数: <span id="nodeCount">1</span>
+    </div>
+
+    <div class="edge-indicator edge-top" id="edgeTop"></div>
+    <div class="edge-indicator edge-bottom" id="edgeBottom"></div>
+    <div class="edge-indicator edge-left" id="edgeLeft"></div>
+    <div class="edge-indicator edge-right" id="edgeRight"></div>
+
+    <div class="word-tooltip" id="wordTooltip">
+        <div class="word-title"></div>
+        <div class="word-meaning"></div>
+    </div>
+
+    <script src="word_mappings.js"></script>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let nodes = [];
+        let animationId;
+        let isPaused = false;
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        let mouseX = centerX;
+        let mouseY = centerY;
+        let hoveredNode = null;
+        let cameraOffsetX = 0;
+        let cameraOffsetY = 0;
+        let cameraZoom = 1;
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let dragStartCameraX = 0;
+        let dragStartCameraY = 0;
+        let edgeScrollVelocityX = 0;
+        let edgeScrollVelocityY = 0;
+        let isEdgeScrolling = false;
+        let hasDragged = false; // 跟踪是否真的拖动了
+        
+        // 单词列表 - 直接嵌入
+        const wordList = [
+            "metaphor","herb","cathedral","queer","velvet","repression","compartment","slack","detriment","practitioner",
+            "binoculars","tub","meadow","memoir","numerical","reap","brigade","distill","magnify","whisky",
+            "probe","penalize","racket","majesty","shuttle","fracture","mischief","justification","cape","aggregate",
+            "peg","notable","caption","conserve","persecute","lizard","certify","eloquent","consulate","recede",
+            "fiscal","therapy","prophet","animate","transplant","vocal","windmill","antonym","anguish","notwithstanding",
+            "imperative","inject","analogy","curfew","eccentric","gasp","foe","jewelry","stalk","aftermath",
+            "flank","miniature","coconut","interim","envoy","subsidiary","aide","Buddhism","grease","complement",
+            "riot","carton","stab","tackle","acupuncture","interrogate","gleam","baffle","congregate","reign",
+            "indict","militant","pebble","abbreviation","intellect","subtle","evade","chamber","grope","stain",
+            "convene","eminent","enclose","civic","posture","thereafter","tease","meticulous","adjacent","vacant",
+            "tickle","bluff","nickel","trivial","elicit","malice","rage","weary","propaganda","undo",
+            "butt","ritual","mammal","tilt","coral","nourish","cocaine","salvage","chapel","cannon",
+            "mentality","bishop","lure","indefinite","ambiguous","bout","mule","collide","withhold","moth",
+            "disregard","tablet","spectrum","gland","brink","pretext","decimal","compile","cloak","serial",
+            "perpetual","terrain","sociology","sarcastic","motto","sane","blackmail","deviate","inflict","melancholy",
+            "privacy","vain","despise","mingle","commemorate","credible","elaborate","dazzle","linger","liability",
+            "hoist","tumor","brisk","knit","franchise","prone","invert","offset","batter","summit",
+            "yoghurt","setback","overlap","hostage","innumerable","passionate","whistle","irrespective","overpass","jockey",
+            "swell","feat","barometer","lenient","domain","pilgrim","sponge","masterpiece","discourse","affirm",
+            "permeate","ivory","embed","provocative","mow","complacent","theft","olive","monarch","sniff",
+            "catastrophe","ultimate","nominal","colonel","dread","wardrobe","humiliate","enact","blunder","pact",
+            "jolt","legitimate","plausible","configuration","offspring","levy","specimen","velocity","hockey","symphony",
+            "prosecute","idiot","witch","bureaucrat","contagious","retort","extract","oath","drawback","pamphlet",
+            "allude","stability","envisage","patrol","saturate","reside","token","flatter","novelty","neutralize",
+            "adore","epidemic","detach","casualty","pumpkin","bewilder","cradle","benign","litter","outrage",
+            "update","lever","shrug","ape","disposition","dwell","equator","yacht","allocate","paradise",
+            "hectic","rationale","shabby","snatch","mob","triple","distort","soothe","converge","sparkle",
+            "lofty","tow","vapor","relish","widespread","underlying","clearing","fraud","indulge","tumble",
+            "quota","portray","galaxy","treasury","glide","knob","fabulous","equity","norm","voluntary",
+            "quest","vicinity","overwhelm","detergent","crackdown","amiable","compliment","mumble","weed","courtesy",
+            "signify","inventory","poise","maiden","folklore","verge","luminous","lust","diesel","prototype",
+            "dissertation","dole","streak","crust","confer","doze","emulate","strand","exposition","glacier",
+            "solo","reunion","rip","cult","esthetic","sway","whirl","seam","friction","wrinkle",
+            "huddle","dwarf","siege","bead","exempt","fragrant","thorn","rejoice","mound","paradox",
+            "wrist","cumulative","redundant","nutrient","yeast","mold","predominant","royalty","delicacy","empirical",
+            "slum","resent","trait","melody","quarterly","rein","encyclopaedia","marginal","hemisphere","sensation",
+            "confederation","embody","twist","stitch","slam","chunk","stubborn","cosmetic","corrode","psychiatry",
+            "intermittent","narrative","propagate","zone","subjective","summon","dome","maternal","wicked","fury",
+            "clutch","prestige","apprentice","dismantle","cosmopolitan","landscape","tile","module","embark","tar",
+            "utmost","loot","etiquette","warfare","numb","diffuse","stray","commend","upgrade","botany",
+            "threshold","scoop","preside","choir","massacre","warrant","orient","jug","havoc","entrust",
+            "dub","foam","shove","extinct","transient","illicit","cripple","confide","sheer","refund",
+            "smash","squad","endorse","intervene","epic","subsidy","ledge","shatter","discrepancy","synthesis",
+            "exquisite","beckon","hibernate","obsolete","antenna","pudding","degenerate","latent","flare","valve",
+            "surpass","motel","toll","fortify","grid","eligible","bass","uproar","flirt","nun",
+            "stun","regime","scent","contemplate","burglar","benevolent","monastery","fling","vow","medieval",
+            "concise","treason","watertight","depot","censor","convict","terrific","faction","sergeant","peel",
+            "bouquet","cork","methodology","linear","tariff","rebound","withstand","xerox","scandal","blunt",
+            "smuggle","complexion","correlate","bizarre","dressing","legacy","inborn","knuckle","bust","pertain",
+            "discord","reassure","brood","utter","refuge","obstacle","turmoil","denounce","variable","junction",
+            "premature","tempo","conspicuous","cemetery","foster","foretell","desolate","dismay","groove","frantic",
+            "deplore","formidable","junk","surge","successor","latitude","ignite","concurrent","pertinent","convoy",
+            "plateau","upright","barracks","incorporate","coexist","greed","coalition","bruise","steak","pyramid",
+            "cuisine","suspicious","prey","captive","straightforward","deploy","clearance","intelligible","intercourse","ward",
+            "fabricate","metro","culminate","herald","plight","weep","ingenious","wedge","rinse","limp",
+            "trek","counteract","destiny","outfit","static","tuck","proximity","mutual","eject","comic",
+            "console","worship","veil","frown","masculine","subscribe","nausea","mishap","vein","intricate",
+            "mercury","carve","utensil","inhibit","beset","indebted","contrive","yearn","exponent","skeleton",
+            "salute","rape","depict","compress","suicide","violet","hitherto","brace","skull","bloc",
+            "insulate","ideology","conspire","shaft","weave","vent","shrewd","strive","lame","grill",
+            "hypocrisy","sneak","fortnight","minibus","pierce","beware","discreet","overhaul","partition","helmet",
+            "momentum","orthodox","crunch","comet","crisp","porcelain","overt","precedent","utilize","plumber",
+            "isle","electoral","outbreak","revelation","tack","squeeze","mansion","decree","cram","tract",
+            "necessitate","verse","toxic","cognitive","differentiate","caravan","resemblance","naive","obedient","nominate",
+            "embroidery","inertia","ego","expedition","forfeit","slogan","prolong","sanction","evaporate","sieve",
+            "monopoly","subordinate","neon","puppet","multitude","patriot","dough","obese","corpse","akin",
+            "solidarity","appraise","adhere","abort","humid","duplicate","retrieve","mediate","envelop","toss",
+            "marshal","trigger","disarm","spacious","profound","validity","boycott","thesis","lyric","thigh",
+            "alternate","counterfeit","aesthetic","treachery","streamline","barn","yell","pathetic","strenuous","manoeuvre",
+            "equate","malignant","devastate","tan","trumpet","delude","wholesome","predator","spouse","beetle",
+            "penguin","dogma","deadlock","obsession","shrub","prairie","allot","suffice","malnutrition","routine",
+            "optimum","alleviate","plea","kin","jargon","premise","flap","clench","spine","finite",
+            "merge","roundabout","contingent","detain","chant","harass","transit","cluster","cavity","syndrome",
+            "retail","epoch","tribe","ratify","accessory","icon","hurricane","tribute","petition","quartz",
+            "aggravate","agony","stroll","adolescent","divine","derail","esteem","memo","napkin","appease",
+            "crouch","radiate","anonymous","ripple","lobster","haven","cockpit","besiege","affiliate","integral",
+            "entail","soar","reliance","immerse","deregulate","eradicate","verify","retention","escort","incumbent",
+            "upset","unfold","repertoire","appall","simulate","edible","reproach","crude","scrutiny","advent",
+            "dedicate","yield","idol","parasite","sculpture","tactics","deter","invalid","hive","cunning",
+            "renaissance","incur","heave","rupture","underestimate","dissident","terrify","howl","defer","graze",
+            "turbulent","inmate","deplete","jungle","nutrition","obligation","statute","hierarchy","oar","feast",
+            "antibiotic","amplify","gauge","vegetation","jolly","layman","compassion","appendix","trademark","muscular",
+            "plaster","deduce","physiological","obscene","orchard","elastic","bolster","almighty","vague","erode",
+            "pedal","slaughter","irritate","flip","henceforth","illuminate","preclude","pedestrian","cricket","foil",
+            "amass","despatch","clan","enlist","murmur","crumble","dispatch","facet","quantify","lubricate",
+            "nurture","directory","anecdote","portfolio","whereby","tragic","lotus","reckless","undermine","porch",
+            "custody","poultry","bleak","clamp","dinosaur","timber","uphold","peril","doctrine","recite",
+            "retrospect","magistrate","visualize","extravagant","meditate","timid","raid","premium","spiral","corporal",
+            "twig","overthrow","salmon","glossary","municipal","handicraft","absurd","testify","aloft","proficient",
+            "dart","fort","questionnaire","lunar","stereotype","persevere","debris","spectator","alloy","propel",
+            "reciprocal","opaque","veto","impromptu","wagon","hinge","designate","fuse","flush","shark",
+            "monetary","inherent","closet","breach","misery","emancipate","imprison","indignant","buffalo","jeopardize",
+            "lounge","lucrative","notorious","stereo","versus","optimism","connotation","literacy","yarn","illiterate",
+            "disclose","virus","mute","amend","clog","wipe","prodigy","revive","abnormal","virgin",
+            "peninsula","reclaim","endeavour","oak","mould","ultraviolet","glamour","spice","impair","participant",
+            "purify","suspension","ale","Easter","pledge","hop","blush","conceive","nasty","pharmacy",
+            "fringe","displace","casino","dividend","likelihood","genre","futile","clergy","dispense","converse",
+            "superstition","span","excerpt","scar","cocktail","escalate","shrink","cleanse","witness","infringe",
+            "solicitor","bald","specialty","lemonade","judicial","splash","intimidate","swarm","cylinder","polar",
+            "dubious","abide","denote","credential","hybrid","longitude","linen","commonwealth","bleach","devour",
+            "occupant","tropic","divert","allure","opt","slot","verdict","loom","glitter","robust",
+            "safeguard","preach","uranium","cauliflower","urge","resonance","chord","spontaneous","voltage","debut",
+            "glare","gospel","depreciate","clasp","prevalent","monotonous","nickname","stump","calcium","skip",
+            "barge","whale","spectacle","barren","perplex","hawk","hardy","impetus","bibliography","panic",
+            "periodic","plague","garlic","quart","raft","patron","warehouse","buffer","tenant","cordial",
+            "cynical","sprinkle","conducive","thrill","thrift","cardinal","vulgar","maneuver","canvas","segregate",
+            "buzz","emigrate","bilateral","rot","tempt","subside","dilute","deduct","fragile","align",
+            "conceit","imminent","feminine","chronicle","jade","elapse","verbal","stagger","overturn","chancellor",
+            "radiant","crave","intrigue","plunge","canoe","homogeneous","shipment","stall","coincide","feeble",
+            "acclaim","alien","cub","sentiment","intrinsic","downgrade","entity","diminish","evoke","activate",
+            "testimony","remnant","moss","sue","bronze","groan","blaze","evacuate","giggle","terrace",
+            "unanimous","inaugurate","stern","carbohydrate","hike","indigenous","transaction","tug","susceptible","hurl",
+            "marble","agitate","pest","motorcycle","jury","recipient","erupt","temperament","blink","sin",
+            "mourn","leaflet","heroin","abrupt","allergic","stumble","lull","celebrity","hum","lash",
+            "ecosystem","hover","adverse","antagonism","pastry","foul","vulnerable","errand","degrade","embargo",
+            "pendulum","dissent","perish","endow","brew","ration","rebellion","analogue","curtail","mythology",
+            "poke","paralyze","paddle","discern","residential","ponder","perfume","constituent","ail","trophy",
+            "erect","vicious","rigorous","missionary","terminate","metallic","zinc","abreast","impart","hamper",
+            "qualitative","rim","mint","hygiene","undertake","mandate","quiver","presume","default","Catholic",
+            "snack","ensue","manuscript","vanity","negligible","migrant","unify","locomotive","annex","humane",
+            "dodge","capsule","rash","vaccine","fusion","versatile","obscure","gorge","reconcile","ceramic",
+            "intuition","jewellery","texture","solitary","stride","constrain","hose","chronic","adversary","exotic",
+            "swing","consecutive","situated","rehearsal","deport","coup","vigorous","void","slash","hypothesis",
+            "staple","crate","jerk","quench","condolence","affix","pirate","lettuce","visa","persistent",
+            "refrain","trench","cliché","oval","prune","relay","ventilate","marsh","prose","revolve",
+            "knight","mop","suppress","traverse","composite","swamp","flutter","ammunition","expire","crow",
+            "prospective","grim","census","transcend","savage","beak","afloat","airborne","fascist","demographic",
+            "disperse","eclipse","tangle","concede","revenge","tentative","hound","morale","patent","tolerant",
+            "throne","hurdle","thermal","iceberg","virtual"
+        ];
+        let wordIndex = 0;
+        
+        // 获取下一个单词
+        function getNextWord() {
+            if (wordList.length === 0) return '';
+            const word = wordList[wordIndex % wordList.length];
+            wordIndex++;
+            return word;
+        }
+
+        class Node {
+            constructor(x, y, isCenter = false) {
+                this.x = x;
+                this.y = y;
+                this.targetX = x;
+                this.targetY = y;
+                this.radius = isCenter ? 25 : 12;
+                this.color = isCenter ? '#60ff90' : this.randomColor();
+                this.isCenter = isCenter;
+                this.children = [];
+                this.parent = null;
+                this.angle = 0;
+                this.distance = 0;
+                this.scale = 0;
+                this.opacity = 0;
+                this.text = '';
+                this.hoverScale = 1;
+                this.inputBoxScale = 0;
+                this.inputBoxOpacity = 0;
+            }
+
+            randomColor() {
+                const colors = ['#50ff80', '#60ff90', '#70ffa0', '#80ffb0', '#90ffc0', '#a0ffd0'];
+                return colors[Math.floor(Math.random() * colors.length)];
+            }
+
+            update() {
+                if (this.scale < 1) {
+                    this.scale += 0.05;
+                    this.opacity += 0.05;
+                }
+                
+                this.x += (this.targetX - this.x) * 0.1;
+                this.y += (this.targetY - this.y) * 0.1;
+
+                // 悬浮效果
+                const isHovered = this === hoveredNode;
+                const targetHoverScale = isHovered ? 1.3 : 1;
+                this.hoverScale += (targetHoverScale - this.hoverScale) * 0.15;
+
+                // 输入框动画
+                const targetInputScale = isHovered ? 1 : 0;
+                const targetInputOpacity = isHovered ? 1 : 0;
+                this.inputBoxScale += (targetInputScale - this.inputBoxScale) * 0.2;
+                this.inputBoxOpacity += (targetInputOpacity - this.inputBoxOpacity) * 0.2;
+            }
+
+            getScreenX() {
+                return (this.x + cameraOffsetX) * cameraZoom + canvas.width / 2;
+            }
+
+            getScreenY() {
+                return (this.y + cameraOffsetY) * cameraZoom + canvas.height / 2;
+            }
+
+            draw() {
+                const screenX = this.getScreenX();
+                const screenY = this.getScreenY();
+
+                // 计算距离中心的距离，用于球状效果
+                const centerDist = Math.hypot(this.x, this.y);
+                const maxDist = 500; // 最大距离
+                const distRatio = Math.min(centerDist / maxDist, 1);
+                
+                // 球状效果：离中心越远，节点越小，透明度越低
+                const sphereScale = 1 - distRatio * 0.4; // 最小缩放到60%
+                const sphereOpacity = 1 - distRatio * 0.3; // 最小透明度70%
+
+                ctx.save();
+                ctx.globalAlpha = Math.min(this.opacity * sphereOpacity, 1);
+                
+                // 绘制连接线（直线）
+                if (this.parent) {
+                    const parentX = this.parent.getScreenX();
+                    const parentY = this.parent.getScreenY();
+                    
+                    // 计算父节点和当前节点的激活状态
+                    const parentActive = this.parent.scale >= 1;
+                    const thisActive = this.scale >= 1;
+                    const lineActive = parentActive && thisActive;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(parentX, parentY);
+                    ctx.lineTo(screenX, screenY);
+                    
+                    if (lineActive) {
+                        // 激活的连接线 - 亮绿色
+                        ctx.strokeStyle = 'rgba(100, 255, 150, 0.6)';
+                        ctx.lineWidth = 3 * cameraZoom;
+                    } else {
+                        // 未激活的连接线 - 暗灰色
+                        ctx.strokeStyle = 'rgba(80, 100, 80, 0.3)';
+                        ctx.lineWidth = 2 * cameraZoom;
+                    }
+                    ctx.stroke();
+                }
+
+                const finalRadius = this.radius * this.scale * this.hoverScale * cameraZoom * sphereScale;
+                const isActive = this.scale >= 1;
+                const isLocked = this.scale < 1;
+
+                // 绘制外层圆环（大圆）
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, finalRadius * 1.8, 0, Math.PI * 2);
+                if (isActive) {
+                    ctx.strokeStyle = 'rgba(100, 255, 150, 0.4)';
+                    ctx.lineWidth = 2 * cameraZoom;
+                } else {
+                    ctx.strokeStyle = 'rgba(80, 100, 80, 0.2)';
+                    ctx.lineWidth = 1.5 * cameraZoom;
+                }
+                ctx.stroke();
+
+                // 绘制中层圆环
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, finalRadius * 1.3, 0, Math.PI * 2);
+                if (isActive) {
+                    ctx.strokeStyle = 'rgba(150, 255, 180, 0.5)';
+                    ctx.lineWidth = 2 * cameraZoom;
+                } else {
+                    ctx.strokeStyle = 'rgba(80, 100, 80, 0.25)';
+                    ctx.lineWidth = 1.5 * cameraZoom;
+                }
+                ctx.stroke();
+
+                // 绘制节点主体
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, finalRadius, 0, Math.PI * 2);
+                
+                if (isActive) {
+                    // 激活状态 - 亮色填充
+                    const gradient = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, finalRadius);
+                    gradient.addColorStop(0, this.color);
+                    gradient.addColorStop(1, this.color + 'cc');
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                    
+                    // 发光边框
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.lineWidth = 3 * cameraZoom;
+                    ctx.stroke();
+                    
+                    // 额外的粉色发光边框
+                    ctx.strokeStyle = 'rgba(255, 100, 150, 0.6)';
+                    ctx.lineWidth = 5 * cameraZoom;
+                    ctx.stroke();
+                } else {
+                    // 未激活状态 - 暗色半透明
+                    ctx.fillStyle = 'rgba(40, 60, 40, 0.6)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(80, 100, 80, 0.5)';
+                    ctx.lineWidth = 2 * cameraZoom;
+                    ctx.stroke();
+                }
+
+                // 绘制光晕效果（仅激活节点）
+                if (isActive) {
+                    const gradient = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, finalRadius * 2.5);
+                    gradient.addColorStop(0, this.color + '30');
+                    gradient.addColorStop(0.5, this.color + '10');
+                    gradient.addColorStop(1, this.color + '00');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, finalRadius * 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // 绘制悬浮时的输入框
+                if (this.inputBoxScale > 0.01) {
+                    ctx.globalAlpha = this.inputBoxOpacity;
+                    
+                    const boxWidth = 160 * this.inputBoxScale;
+                    const boxHeight = 40 * this.inputBoxScale;
+                    const boxX = screenX - boxWidth / 2;
+                    const boxY = screenY + finalRadius + 15;
+
+                    // 绘制输入框背景
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                    ctx.strokeStyle = '#667eea';
+                    ctx.lineWidth = 2;
+                    this.roundRect(boxX, boxY, boxWidth, boxHeight, 8);
+                    ctx.fill();
+                    ctx.stroke();
+
+                    // 绘制提示文本
+                    if (this.inputBoxScale > 0.5) {
+                        ctx.fillStyle = '#666';
+                        ctx.font = '13px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        const displayText = this.text || '点击编辑文本...';
+                        ctx.fillText(displayText, screenX, boxY + boxHeight / 2);
+                    }
+
+                    // 绘制连接线
+                    ctx.beginPath();
+                    ctx.moveTo(screenX, screenY + finalRadius);
+                    ctx.lineTo(screenX, boxY);
+                    ctx.strokeStyle = 'rgba(102, 126, 234, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+
+                // 绘制已保存的文本
+                if (this.text && this.inputBoxScale < 0.3) {
+                    ctx.globalAlpha = 1;
+                    ctx.fillStyle = 'white';
+                    ctx.font = '12px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    ctx.fillText(this.text, screenX, screenY + finalRadius + 5);
+                }
+
+                ctx.restore();
+            }
+
+            roundRect(x, y, width, height, radius) {
+                ctx.beginPath();
+                ctx.moveTo(x + radius, y);
+                ctx.lineTo(x + width - radius, y);
+                ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+                ctx.lineTo(x + width, y + height - radius);
+                ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+                ctx.lineTo(x + radius, y + height);
+                ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+                ctx.lineTo(x, y + radius);
+                ctx.quadraticCurveTo(x, y, x + radius, y);
+                ctx.closePath();
+            }
+
+            isPointInside(x, y) {
+                const screenX = this.getScreenX();
+                const screenY = this.getScreenY();
+                const dist = Math.hypot(screenX - x, screenY - y);
+                return dist <= this.radius * this.scale;
+            }
+        }
+
+        // 初始化中心节点
+        function init() {
+            const centerNode = new Node(0, 0, true);
+            centerNode.scale = 1;
+            centerNode.opacity = 1;
+            centerNode.text = getNextWord(); // 中心节点也分配单词
+            nodes.push(centerNode);
+            updateNodeCount();
+        }
+
+        let layerNodes = []; // 存储每层的节点
+        const LAYER_DISTANCE = 100; // 层间距离
+
+        function addNode() {
+            if (nodes.length === 0) {
+                init();
+                layerNodes = [[nodes[0]]]; // 第0层只有中心节点
+                return;
+            }
+
+            // 找到当前未满的层
+            let currentLayer = 1;
+            for (let i = 1; i < 100; i++) {
+                if (!layerNodes[i]) {
+                    layerNodes[i] = [];
+                    currentLayer = i;
+                    break;
+                }
+                const nodesInLayer = Math.max(6, i * 6);
+                if (layerNodes[i].length < nodesInLayer) {
+                    currentLayer = i;
+                    break;
+                }
+            }
+            
+            const radius = currentLayer * LAYER_DISTANCE;
+            const nodesInThisLayer = Math.max(6, currentLayer * 6);
+            const nodeIndexInLayer = layerNodes[currentLayer].length;
+            
+            // 均匀分布角度
+            const angleStep = (Math.PI * 2) / nodesInThisLayer;
+            const angle = angleStep * nodeIndexInLayer;
+            
+            // 计算位置
+            const newX = Math.cos(angle) * radius;
+            const newY = Math.sin(angle) * radius;
+
+            // 找到上一层最近的节点作为父节点
+            let parent = nodes[0];
+            let minDist = Infinity;
+            
+            if (currentLayer > 0 && layerNodes[currentLayer - 1]) {
+                for (let node of layerNodes[currentLayer - 1]) {
+                    const dist = Math.hypot(node.x - newX, node.y - newY);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        parent = node;
+                    }
+                }
+            }
+
+            const newNode = new Node(newX, newY);
+            newNode.targetX = newX;
+            newNode.targetY = newY;
+            newNode.parent = parent;
+            newNode.layer = currentLayer;
+            newNode.text = getNextWord(); // 按顺序分配单词
+
+            parent.children.push(newNode);
+            nodes.push(newNode);
+            layerNodes[currentLayer].push(newNode);
+            updateNodeCount();
+        }
+
+        function clearNodes() {
+            nodes = [];
+            init();
+        }
+
+        function toggleAnimation() {
+            isPaused = !isPaused;
+        }
+
+        function updateNodeCount() {
+            document.getElementById('nodeCount').textContent = nodes.length;
+        }
+
+        function screenToWorld(screenX, screenY) {
+            return {
+                x: (screenX - canvas.width / 2) / cameraZoom - cameraOffsetX,
+                y: (screenY - canvas.height / 2) / cameraZoom - cameraOffsetY
+            };
+        }
+
+        function updateCamera() {
+            // 边缘滚动检测
+            const edgeThreshold = 80; // 边缘触发区域大小
+            const maxScrollSpeed = 5; // 最大滚动速度
+            
+            edgeScrollVelocityX = 0;
+            edgeScrollVelocityY = 0;
+            
+            // 检测鼠标是否在边缘
+            if (mouseX < edgeThreshold) {
+                // 左边缘
+                const ratio = 1 - (mouseX / edgeThreshold);
+                edgeScrollVelocityX = ratio * maxScrollSpeed;
+            } else if (mouseX > canvas.width - edgeThreshold) {
+                // 右边缘
+                const ratio = (mouseX - (canvas.width - edgeThreshold)) / edgeThreshold;
+                edgeScrollVelocityX = -ratio * maxScrollSpeed;
+            }
+            
+            if (mouseY < edgeThreshold) {
+                // 上边缘
+                const ratio = 1 - (mouseY / edgeThreshold);
+                edgeScrollVelocityY = ratio * maxScrollSpeed;
+            } else if (mouseY > canvas.height - edgeThreshold) {
+                // 下边缘
+                const ratio = (mouseY - (canvas.height - edgeThreshold)) / edgeThreshold;
+                edgeScrollVelocityY = -ratio * maxScrollSpeed;
+            }
+            
+            if (!isDragging) {
+                // 应用边缘滚动
+                if (edgeScrollVelocityX !== 0 || edgeScrollVelocityY !== 0) {
+                    isEdgeScrolling = true;
+                    cameraOffsetX += edgeScrollVelocityX / cameraZoom;
+                    cameraOffsetY += edgeScrollVelocityY / cameraZoom;
+                } else if (!isEdgeScrolling) {
+                    // 只有在没有进行过边缘滚动时才应用鼠标跟随
+                    const mouseOffsetX = mouseX - canvas.width / 2;
+                    const mouseOffsetY = mouseY - canvas.height / 2;
+                    
+                    // 设置跟随强度
+                    const followStrength = 0.05;
+                    const targetX = mouseOffsetX * followStrength / cameraZoom;
+                    const targetY = mouseOffsetY * followStrength / cameraZoom;
+                    
+                    // 平滑过渡
+                    cameraOffsetX += (targetX - cameraOffsetX) * 0.08;
+                    cameraOffsetY += (targetY - cameraOffsetY) * 0.08;
+                }
+            }
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!isPaused) {
+                updateCamera();
+                nodes.forEach(node => {
+                    node.update();
+                    node.draw();
+                });
+            } else {
+                nodes.forEach(node => node.draw());
+            }
+
+            animationId = requestAnimationFrame(animate);
+        }
+
+        // 显示输入框
+        function showInputBox(node, x, y) {
+            // 移除已存在的输入框
+            const existingInput = document.querySelector('.node-input');
+            if (existingInput) {
+                existingInput.remove();
+            }
+
+            const inputContainer = document.createElement('div');
+            inputContainer.className = 'node-input';
+            inputContainer.style.left = x + 'px';
+            inputContainer.style.top = (y + node.radius + 10) + 'px';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = node.text;
+            input.placeholder = '输入文本...';
+            
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    node.text = input.value;
+                    inputContainer.remove();
+                } else if (e.key === 'Escape') {
+                    inputContainer.remove();
+                }
+            });
+
+            input.addEventListener('blur', () => {
+                node.text = input.value;
+                setTimeout(() => inputContainer.remove(), 200);
+            });
+
+            inputContainer.appendChild(input);
+            document.body.appendChild(inputContainer);
+            input.focus();
+        }
+
+        // 点击画布（已禁用编辑和添加功能）
+        // canvas.addEventListener('click', (e) => {
+        //     // 功能已禁用
+        // });
+
+        // 鼠标按下
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+            // 检查是否点击了节点
+            let clickedNode = null;
+            for (let i = nodes.length - 1; i >= 0; i--) {
+                if (nodes[i].isPointInside(clickX, clickY)) {
+                    clickedNode = nodes[i];
+                    break;
+                }
+            }
+
+            if (!clickedNode) {
+                isDragging = true;
+                hasDragged = false; // 重置拖动标志
+                isEdgeScrolling = true; // 拖动时标记为已滚动，防止复位
+                dragStartX = clickX;
+                dragStartY = clickY;
+                dragStartCameraX = cameraOffsetX;
+                dragStartCameraY = cameraOffsetY;
+                canvas.style.cursor = 'grabbing';
+            }
+        });
+
+        // 鼠标移动事件
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX - rect.left;
+            mouseY = e.clientY - rect.top;
+
+            // 更新边缘指示器
+            const edgeThreshold = 80;
+            document.getElementById('edgeTop').classList.toggle('active', mouseY < edgeThreshold);
+            document.getElementById('edgeBottom').classList.toggle('active', mouseY > canvas.height - edgeThreshold);
+            document.getElementById('edgeLeft').classList.toggle('active', mouseX < edgeThreshold);
+            document.getElementById('edgeRight').classList.toggle('active', mouseX > canvas.width - edgeThreshold);
+
+            if (isDragging) {
+                const dx = mouseX - dragStartX;
+                const dy = mouseY - dragStartY;
+                // 如果移动超过5像素，标记为真正的拖动
+                if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                    hasDragged = true;
+                }
+                cameraOffsetX = dragStartCameraX + dx / cameraZoom;
+                cameraOffsetY = dragStartCameraY + dy / cameraZoom;
+            } else {
+                // 检测悬浮的节点
+                hoveredNode = null;
+                for (let i = nodes.length - 1; i >= 0; i--) {
+                    if (nodes[i].isPointInside(mouseX, mouseY)) {
+                        hoveredNode = nodes[i];
+                        canvas.style.cursor = 'pointer';
+                        if (hoveredNode.text && typeof wordMeanings !== 'undefined') {
+                            showTooltip(hoveredNode.text, e.clientX, e.clientY);
+                        }
+                        break;
+                    }
+                }
+                
+                if (!hoveredNode) {
+                    canvas.style.cursor = 'grab';
+                    hideTooltip();
+                }
+            }
+        });
+
+        // 鼠标松开
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            canvas.style.cursor = 'grab';
+            // 延迟重置 hasDragged，让 click 事件能够读取到
+            setTimeout(() => {
+                hasDragged = false;
+            }, 10);
+        });
+
+        // 鼠标离开画布
+        canvas.addEventListener('mouseleave', () => {
+            hoveredNode = null;
+            isDragging = false;
+            canvas.style.cursor = 'grab';
+            hideTooltip();
+        });
+
+        // Tooltip 功能
+        const tooltip = document.getElementById('wordTooltip');
+        
+        function showTooltip(word, x, y) {
+            if (typeof wordMeanings === 'undefined') return;
+            const meaning = wordMeanings[word.toLowerCase()];
+            if (meaning) {
+                tooltip.querySelector('.word-title').textContent = word;
+                tooltip.querySelector('.word-meaning').textContent = meaning;
+                tooltip.style.left = x + 'px';
+                tooltip.style.top = (y + 20) + 'px';
+                tooltip.classList.add('visible');
+            }
+        }
+        
+        function hideTooltip() {
+            tooltip.classList.remove('visible');
+        }
+
+        // 滚轮缩放
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            // 缩放前的世界坐标
+            const worldPosBefore = screenToWorld(mouseX, mouseY);
+            
+            // 更新缩放
+            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+            cameraZoom = Math.max(0.1, Math.min(3, cameraZoom * zoomFactor));
+            
+            // 缩放后的世界坐标
+            const worldPosAfter = screenToWorld(mouseX, mouseY);
+            
+            // 调整相机位置，使鼠标位置的世界坐标保持不变
+            cameraOffsetX += worldPosBefore.x - worldPosAfter.x;
+            cameraOffsetY += worldPosBefore.y - worldPosAfter.y;
+        });
+
+        // 窗口大小调整
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // 启动
+        init();
+        animate();
+
+        // 自动添加一些节点作为演示
+        setTimeout(() => {
+            for (let i = 0; i < 1286; i++) {
+                setTimeout(() => addNode(), i * 10);
+            }
+        }, 500);
+    </script>
+</body>
+</html>
