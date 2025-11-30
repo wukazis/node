@@ -1032,15 +1032,16 @@
             e.preventDefault();
             
             if (e.touches.length === 0) {
-                isTouching = false;
                 isDragging = false;
                 hoveredNode = null;
+                hideTooltip();
                 
+                // 延迟重置所有状态，确保相机不会立即跟随
                 setTimeout(() => {
+                    isTouching = false;
                     hasDragged = false;
-                    isEdgeScrolling = false; // 触摸结束后允许相机跟随
-                    hideTooltip();
-                }, 10);
+                    isEdgeScrolling = false;
+                }, 100); // 增加延迟时间
             } else if (e.touches.length === 1) {
                 // 从双指变为单指，重新初始化单指拖动
                 const touch = e.touches[0];
