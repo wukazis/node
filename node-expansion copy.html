@@ -928,6 +928,139 @@
             cameraOffsetY += worldPosBefore.y - worldPosAfter.y;
         });
 
+        // 触摸事件支持（手机端）
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let touchStartDistance = 0;
+        let touchStartZoom = 1;
+        let isTouching = false;
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            isTouching = true;
+            
+            if (e.touches.length === 1) {
+                // 单指拖动
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                touchStartX = touch.clientX - rect.left;
+                touchStartY = touch.clientY - rect.top;
+                
+                isDragging = true;
+                hasDragged = false;
+                dragStartX = touchStartX;
+                dragStartY = touchStartY;
+                dragStartCameraX = cameraOffsetX;
+                dragStartCameraY = cameraOffsetY;
+                
+                // 检查是否触摸到节点
+                hoveredNode = null;
+                for (let i = nodes.length - 1; i >= 0; i--) {
+                    if (nodes[i].isPointInside(touchStartX, touchStartY)) {
+                        hoveredNode = nodes[i];
+                        if (hoveredNode.text && typeof wordMeanings !== 'undefined') {
+                            showTooltip(hoveredNode.text, touch.clientX, touch.clientY);
+                        }
+                        break;
+                    }
+                }
+            } else if (e.touches.length === 2) {
+                // 双指缩放
+                const touch1 = e.touches[0];
+                const touch2 = e.touches[1];
+                touchStartDistance = Math.hypot(
+                    touch2.clientX - touch1.clientX,
+                    touch2.clientY - touch1.clientY
+                );
+                touchStartZoom = cameraZoom;
+                isDragging = false;
+            }
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            
+            if (e.touches.length === 1 && isDragging) {
+                // 单指拖动
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                const touchX = touch.clientX - rect.left;
+                const touchY = touch.clientY - rect.top;
+                
+                const dx = touchX - dragStartX;
+                const dy = touchY - dragStartY;
+                
+                if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                    hasDragged = true;
+                    hideTooltip();
+                }
+                
+                cameraOffsetX = dragStartCameraX + dx / cameraZoom;
+                cameraOffsetY = dragStartCameraY + dy / cameraZoom;
+                
+            } else if (e.touches.length === 2) {
+                // 双指缩放
+                const touch1 = e.touches[0];
+                const touch2 = e.touches[1];
+                const currentDistance = Math.hypot(
+                    touch2.clientX - touch1.clientX,
+                    touch2.clientY - touch1.clientY
+                );
+                
+                const rect = canvas.getBoundingClientRect();
+                const centerX = (touch1.clientX + touch2.clientX) / 2 - rect.left;
+                const centerY = (touch1.clientY + touch2.clientY) / 2 - rect.top;
+                
+                // 缩放前的世界坐标
+                const worldPosBefore = screenToWorld(centerX, centerY);
+                
+                // 更新缩放
+                const zoomFactor = currentDistance / touchStartDistance;
+                cameraZoom = Math.max(0.1, Math.min(3, touchStartZoom * zoomFactor));
+                
+                // 缩放后的世界坐标
+                const worldPosAfter = screenToWorld(centerX, centerY);
+                
+                // 调整相机位置
+                cameraOffsetX += worldPosBefore.x - worldPosAfter.x;
+                cameraOffsetY += worldPosBefore.y - worldPosAfter.y;
+            }
+        });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            
+            if (e.touches.length === 0) {
+                isTouching = false;
+                isDragging = false;
+                hoveredNode = null;
+                
+                setTimeout(() => {
+                    hasDragged = false;
+                    hideTooltip();
+                }, 10);
+            } else if (e.touches.length === 1) {
+                // 从双指变为单指，重新初始化单指拖动
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                touchStartX = touch.clientX - rect.left;
+                touchStartY = touch.clientY - rect.top;
+                dragStartX = touchStartX;
+                dragStartY = touchStartY;
+                dragStartCameraX = cameraOffsetX;
+                dragStartCameraY = cameraOffsetY;
+                isDragging = true;
+            }
+        });
+
+        canvas.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            isTouching = false;
+            isDragging = false;
+            hoveredNode = null;
+            hideTooltip();
+        });
+
         // 窗口大小调整
         window.addEventListener('resize', () => {
             canvas.width = window.innerWidth;
