@@ -717,7 +717,7 @@
                 edgeScrollVelocityY = -ratio * maxScrollSpeed;
             }
             
-            if (!isDragging) {
+            if (!isDragging && !isTouching) {
                 // 应用边缘滚动
                 if (edgeScrollVelocityX !== 0 || edgeScrollVelocityY !== 0) {
                     isEdgeScrolling = true;
