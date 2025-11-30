@@ -948,6 +948,7 @@
                 
                 isDragging = true;
                 hasDragged = false;
+                isEdgeScrolling = true; // 防止相机复位
                 dragStartX = touchStartX;
                 dragStartY = touchStartY;
                 dragStartCameraX = cameraOffsetX;
@@ -1037,6 +1038,7 @@
                 
                 setTimeout(() => {
                     hasDragged = false;
+                    isEdgeScrolling = false; // 触摸结束后允许相机跟随
                     hideTooltip();
                 }, 10);
             } else if (e.touches.length === 1) {
@@ -1057,6 +1059,7 @@
             e.preventDefault();
             isTouching = false;
             isDragging = false;
+            isEdgeScrolling = false;
             hoveredNode = null;
             hideTooltip();
         });
